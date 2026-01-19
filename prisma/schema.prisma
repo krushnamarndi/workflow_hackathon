@@ -17,8 +17,13 @@ model User {
   firstName       String?
   lastName        String?
   profileImage    String?
+  credits         BigInt   @default(0)  // 1M credits = $1
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  // Relations
+  apiKeys         ApiKey[]
+  creditLedger    CreditTransaction[]
 
   @@index([clerkId])
   @@map("users")
@@ -57,20 +62,72 @@ model Workflow {
 }
 
 model WorkflowExecution {
-  id         String   @id @default(cuid())
-  workflowId String
-  userId     String
-  nodeId     String
-  runId      String?
-  status     String   // 'running', 'completed', 'failed'
-  input      Json?
-  output     Json?
-  error      String?
-  createdAt  DateTime @default(now())
-  completedAt DateTime?
+  id            String    @id @default(cuid())
+  workflowId    String
+  userId        String
+  nodeId        String
+  runId         String?
+  status        String    // 'pending', 'running', 'completed', 'failed'
+  scope         String    @default("full")  // 'full', 'partial', 'single'
+  input         Json?
+  output        Json?
+  error         String?
+  provider      String?   // Which provider handled this execution
+  creditCost    BigInt?   // Actual cost in credits
+  estimatedCost BigInt?   // Pre-execution estimate
+  durationMs    Int?      // Execution duration in milliseconds
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
 
   @@index([workflowId])
   @@index([userId])
   @@index([runId])
   @@map("workflow_executions")
+}
+
+// ============================================================================
+// API Key Management (for Public REST API)
+// ============================================================================
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String    // Human-readable name for the key
+  keyHash     String    @unique  // SHA-256 hash of the actual key
+  keyPrefix   String    // First 8 chars for identification (e.g., "wv_live_")
+  lastFour    String    // Last 4 chars for display
+  scopes      String[]  // ['workflows:read', 'workflows:write', 'workflows:execute']
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  @@index([userId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+// ============================================================================
+// Credit Transaction Ledger
+// ============================================================================
+
+model CreditTransaction {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount        BigInt   // Positive = credit (topup), Negative = debit (usage)
+  balance       BigInt   // Balance after this transaction
+  type          String   // 'execution', 'topup', 'refund', 'adjustment', 'bonus'
+  description   String   // Human-readable description
+  executionId   String?  // Link to WorkflowExecution if applicable
+  nodeId        String?  // Which node incurred this cost
+  provider      String?  // Which provider was used
+  metadata      Json?    // Additional metadata (invoice ID, etc.)
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([executionId])
+  @@index([createdAt])
+  @@map("credit_transactions")
 }
